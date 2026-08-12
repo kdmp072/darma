@@ -1,7 +1,16 @@
 import { calculateSppg411Totals, shouldShowConditionalField, SPPG_411_ROWS } from '../../domain/forms/sppg-calculations.js';
+import { currencyScaleForField, displayUnitForField, formatRupiahAmount, formatStoredCurrency, parseCurrencyToStored, parseRupiahAmount } from '../../domain/forms/currency.js';
 
 function showPreview(html,color,hasil){const el=document.getElementById('hasilPreview');el.innerHTML=html;el.style.color='#fff';el.style.background=color;el.style.borderColor=color;document.getElementById('hasilPreviewWrap').style.display='block';currentPreviewHasil=hasil;}
 function hidePreview(){document.getElementById('hasilPreviewWrap').style.display='none';currentPreviewHasil=null;}
+function focusCurrencyInput(input){const amount=parseRupiahAmount(input.value);input.value=amount==null?'':String(amount);input.select();}
+function blurCurrencyInput(input){const amount=parseRupiahAmount(input.value);input.value=amount==null?'':formatRupiahAmount(amount);}
+function currencyInputHtml({id,className,storedValue,scale,readOnly=false,onInput='onFormInput()'}){
+  const ro=readOnly?' readonly tabindex="-1"':'';
+  const editEvents=readOnly?'':` onfocus="focusCurrencyInput(this)" onblur="blurCurrencyInput(this)" oninput="${onInput}"`;
+  return `<input class="${className}" type="text" inputmode="numeric" autocomplete="off" data-currency-scale="${scale}" id="${id}" value="${esc(formatStoredCurrency(storedValue,scale))}"${ro}${editEvents}/>`;
+}
+function currencyHint(field,parentField=null){const unit=displayUnitForField(field,parentField);return unit?`<div class="qunit-hint">Satuan tampilan: ${esc(unit)}</div>`:'';}
 
 function formFieldHtml(f,data){
   const v=data?data[f.id]:undefined;
@@ -79,22 +88,40 @@ function formFieldHtml(f,data){
     const sel=Array.isArray(v)?v:[];
     return `<div class="qchips" data-fid="${f.id}" data-multi="1">${f.opts.map(o=>`<button type="button" class="qchip ${sel.indexOf(o)>=0?'on':''}" data-opt="${esc(o)}" onclick="pickChip(this,true)">${esc(o)}</button>`).join('')}</div>`;
   }
+  const currencyScale=currencyScaleForField(f);
+  if(currencyScale)return currencyInputHtml({id:'ff_'+f.id,className:'fc',storedValue:v,scale:currencyScale})+currencyHint(f);
   const tp=f.type==='n'?'number':(f.type==='d'?'date':(f.type==='tm'?'time':'text'));
   return `<input type="${tp}" id="ff_${f.id}" class="fc" value="${esc(v||'')}" placeholder="${esc(f.label)}" ${f.type==='n'?'step="any"':''} oninput="onFormInput()"/>${f.unit?`<div class="qunit-hint">Satuan: ${esc(f.unit)}</div>`:''}`;
 }
 function gridFieldHtml(f,data){
   const d=(data&&data[f.id])||{};
   if(f.fields&&f.fields.length){
-    let h='<table class="qgrid"><thead><tr><th>Item</th>'+f.fields.map(c=>`<th>${esc(c.label)}${c.unit?`<br><span style="font-weight:400;text-transform:none">(${esc(c.unit)})</span>`:''}</th>`).join('')+'</tr></thead><tbody>';
-    f.rows.forEach(r=>{h+='<tr><td class="glab">'+esc(r.label)+'</td>'+f.fields.map(c=>{const val=(d[r.id]&&d[r.id][c.id])||'',tp=c.type==='time'?'time':'number',ro=r.computed?' readonly tabindex="-1"':'',evt=r.computed?'':' oninput="onFormInput();'+(f.id==='sp411'?'updateSppgComputedTotals()':'')+'"';return '<td><input class="ginp" type="'+tp+'" '+(tp==='number'?'step="any" ':'')+'id="ff_'+f.id+'__'+r.id+'__'+c.id+'" value="'+esc(val)+'"'+ro+evt+'/></td>';}).join('')+'</tr>';});
+    let h='<table class="qgrid"><thead><tr><th>Item</th>'+f.fields.map(column=>{
+      const scale=currencyScaleForField(column,f),unit=scale?displayUnitForField(column,f):column.unit;
+      return `<th>${esc(column.label)}${unit?`<br><span style="font-weight:400;text-transform:none">(${esc(unit)})</span>`:''}</th>`;
+    }).join('')+'</tr></thead><tbody>';
+    f.rows.forEach(row=>{
+      h+='<tr><td class="glab">'+esc(row.label)+'</td>'+f.fields.map(column=>{
+        const rawValue=d[row.id]&&d[row.id][column.id],value=rawValue==null?'':rawValue,scale=currencyScaleForField(column,f),readOnly=!!row.computed;
+        const onInput='onFormInput();'+(f.id==='sp411'?'updateSppgComputedTotals()':'');
+        if(scale)return '<td>'+currencyInputHtml({id:'ff_'+f.id+'__'+row.id+'__'+column.id,className:'ginp',storedValue:value,scale,readOnly,onInput})+'</td>';
+        const type=column.type==='time'?'time':'number',ro=readOnly?' readonly tabindex="-1"':'',eventAttr=readOnly?'':` oninput="${onInput}"`;
+        return `<td><input class="ginp" type="${type}" ${type==='number'?'step="any" ':''}id="ff_${f.id}__${row.id}__${column.id}" value="${esc(value)}"${ro}${eventAttr}/></td>`;
+      }).join('')+'</tr>';
+    });
     return '<div class="qgrid-wrap">'+h+'</tbody></table></div>';
   }
-  const yn=f.rows.some(r=>r.type==='yn');
-  let h='<table class="qgrid"><thead><tr><th>Item</th>'+(yn?'<th>Jawaban</th>':'<th>'+esc(f.unit||'Nilai')+'</th>')+'</tr></thead><tbody>';
-  f.rows.forEach(r=>{
-    const val=d[r.id];
-    if(r.type==='yn'){h+='<tr><td class="glab">'+esc(r.label)+'</td><td><div class="qchips" data-fid="'+f.id+'__'+r.id+'" data-multi="0"><button type="button" class="qchip '+(val==='Ya'?'on':'')+'" data-opt="Ya" onclick="pickChip(this,false)">Ya</button><button type="button" class="qchip '+(val==='Tidak'?'on':'')+'" data-opt="Tidak" onclick="pickChip(this,false)">Tidak</button></div></td></tr>';}
-    else{h+='<tr><td class="glab">'+esc(r.label)+'</td><td><input class="ginp" type="number" step="any" id="ff_'+f.id+'__'+r.id+'" value="'+esc(val||'')+'" oninput="onFormInput()"/></td></tr>';}
+  const yn=f.rows.some(row=>row.type==='yn'),scale=currencyScaleForField(f),unit=scale?displayUnitForField(f):(f.unit||'Nilai');
+  let h='<table class="qgrid"><thead><tr><th>Item</th>'+(yn?'<th>Jawaban</th>':'<th>'+esc(unit)+'</th>')+'</tr></thead><tbody>';
+  f.rows.forEach(row=>{
+    const value=d[row.id];
+    if(row.type==='yn'){
+      h+='<tr><td class="glab">'+esc(row.label)+'</td><td><div class="qchips" data-fid="'+f.id+'__'+row.id+'" data-multi="0"><button type="button" class="qchip '+(value==='Ya'?'on':'')+'" data-opt="Ya" onclick="pickChip(this,false)">Ya</button><button type="button" class="qchip '+(value==='Tidak'?'on':'')+'" data-opt="Tidak" onclick="pickChip(this,false)">Tidak</button></div></td></tr>';
+    }else if(scale){
+      h+='<tr><td class="glab">'+esc(row.label)+'</td><td>'+currencyInputHtml({id:'ff_'+f.id+'__'+row.id,className:'ginp',storedValue:value,scale})+'</td></tr>';
+    }else{
+      h+='<tr><td class="glab">'+esc(row.label)+'</td><td><input class="ginp" type="number" step="any" id="ff_'+f.id+'__'+row.id+'" value="'+esc(value||'')+'" oninput="onFormInput()"/></td></tr>';
+    }
   });
   return '<div class="qgrid-wrap">'+h+'</tbody></table></div>';
 }
@@ -111,9 +138,10 @@ function updateSppgConditionalFields(){
   document.querySelectorAll('#rekamForm .qfield[data-show-field]').forEach(row=>{const fid=row.dataset.showField,need=row.dataset.showContains||'',on=document.querySelector(`#rekamForm .qchips[data-fid="${fid}"] .qchip.on`),val=on?on.dataset.opt:'',show=shouldShowConditionalField(val,need);row.style.display=show?'':'none';if(!show){const inp=row.querySelector('input,textarea,select');if(inp)inp.value='';}});
 }
 function updateSppgComputedTotals(){
-  const table={};SPPG_411_ROWS.forEach(row=>{table[row]={dalam:getVal('ff_sp411__'+row+'__dalam'),luar:getVal('ff_sp411__'+row+'__luar')};});
+  const scale=1000000,table={};
+  SPPG_411_ROWS.forEach(row=>{table[row]={dalam:parseCurrencyToStored(getVal('ff_sp411__'+row+'__dalam'),scale),luar:parseCurrencyToStored(getVal('ff_sp411__'+row+'__luar'),scale)};});
   const totals=calculateSppg411Totals(table);
-  ['dalam','luar'].forEach(col=>{const el=document.getElementById('ff_sp411__total__'+col);if(el)el.value=totals[col]||'';});
+  ['dalam','luar'].forEach(col=>{const el=document.getElementById('ff_sp411__total__'+col);if(el)el.value=formatStoredCurrency(totals[col],scale);});
 }
 function onFormInput(){if(currentRekamJenis!=='KDMP')previewHasilManual();}
 function renderRekamForm(jenis,rec){
@@ -301,8 +329,8 @@ function collectGeneric(formDef){
   formDef.sections.forEach(sec=>sec.fields.forEach(f=>{
     if(f.type==='g'){
       const o={};
-      if(f.fields&&f.fields.length){f.rows.forEach(r=>{o[r.id]={};f.fields.forEach(c=>{const el=document.getElementById('ff_'+f.id+'__'+r.id+'__'+c.id);o[r.id][c.id]=el?(el.value||''):'';});});}
-      else{f.rows.forEach(r=>{if(r.type==='yn'){const wrap=document.querySelector('.qchips[data-fid="'+f.id+'__'+r.id+'"]');const on=wrap?wrap.querySelector('.qchip.on'):null;o[r.id]=on?on.getAttribute('data-opt'):'';}else{const el=document.getElementById('ff_'+f.id+'__'+r.id);o[r.id]=el?(el.value||''):'';}});}
+      if(f.fields&&f.fields.length){f.rows.forEach(r=>{o[r.id]={};f.fields.forEach(c=>{const el=document.getElementById('ff_'+f.id+'__'+r.id+'__'+c.id),scale=currencyScaleForField(c,f);o[r.id][c.id]=el?(scale?parseCurrencyToStored(el.value,scale):(el.value||'')):'';});});}
+      else{f.rows.forEach(r=>{if(r.type==='yn'){const wrap=document.querySelector('.qchips[data-fid="'+f.id+'__'+r.id+'"]');const on=wrap?wrap.querySelector('.qchip.on'):null;o[r.id]=on?on.getAttribute('data-opt'):'';}else{const el=document.getElementById('ff_'+f.id+'__'+r.id),scale=currencyScaleForField(f);o[r.id]=el?(scale?parseCurrencyToStored(el.value,scale):(el.value||'')):'';}});}
       data[f.id]=o;
     }else if(f.type==='c'||f.type==='yn'){
       const wrap=document.querySelector('.qchips[data-fid="'+f.id+'"]');const on=wrap?wrap.querySelector('.qchip.on'):null;
@@ -311,8 +339,8 @@ function collectGeneric(formDef){
       const wrap=document.querySelector('.qchips[data-fid="'+f.id+'"]');
       data[f.id]=wrap?Array.prototype.slice.call(wrap.querySelectorAll('.qchip.on')).map(b=>b.getAttribute('data-opt')):[];
     }else{
-      const el=document.getElementById('ff_'+f.id);
-      data[f.id]=el?(el.value||''):'';
+      const el=document.getElementById('ff_'+f.id),scale=currencyScaleForField(f);
+      data[f.id]=el?(scale?parseCurrencyToStored(el.value,scale):(el.value||'')):'';
     }
   }));
   return {fields:data};
@@ -340,4 +368,4 @@ function monDetailAspects(m){
 
 
 /* Public action bridge for existing HTML controls. */
-Object.assign(globalThis, { showPreview, hidePreview, formFieldHtml, gridFieldHtml, renderGenericForm, pickChip, updateSppgConditionalFields, updateSppgComputedTotals, onFormInput, renderRekamForm, switchRekamForm, pickScore, pickYN, hasilSaran, previewHasilManual, calcRekam, collectKDMP, collectGeneric, monDetailAspects });
+Object.assign(globalThis, { showPreview, hidePreview, focusCurrencyInput, blurCurrencyInput, formFieldHtml, gridFieldHtml, renderGenericForm, pickChip, updateSppgConditionalFields, updateSppgComputedTotals, onFormInput, renderRekamForm, switchRekamForm, pickScore, pickYN, hasilSaran, previewHasilManual, calcRekam, collectKDMP, collectGeneric, monDetailAspects });
