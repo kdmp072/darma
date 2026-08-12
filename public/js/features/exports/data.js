@@ -11,10 +11,13 @@ function getJsPDF(){
   if(!window.jspdf||!window.jspdf.jsPDF){toast('Library PDF belum termuat — butuh internet saat pertama membuka aplikasi.','e');return null;}
   return window.jspdf.jsPDF;
 }
-function pdfHead(doc,title,subtitle){
+function pdfHead(doc,title,subtitle,theme=null){
   const w=doc.internal.pageSize.getWidth();
-  doc.setFillColor(200,16,46);doc.rect(0,0,w,20,'F');
-  doc.setTextColor(255,255,255);
+  const headerBackground=theme&&theme.headerBackground?theme.headerBackground:[200,16,46];
+  const headerText=theme&&theme.headerText?theme.headerText:[255,255,255];
+  doc.__darmaPdfTheme=theme;
+  doc.setFillColor(...headerBackground);doc.rect(0,0,w,20,'F');
+  doc.setTextColor(...headerText);
   doc.setFontSize(13);doc.setFont('helvetica','bold');
   doc.text('DARMA',12,8.5);
   doc.setFontSize(8.5);doc.setFont('helvetica','normal');

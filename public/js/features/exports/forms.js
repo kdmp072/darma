@@ -1,3 +1,5 @@
+import { themeForFormType } from './pdf-theme.js';
+
 /* ============================================================
    CETAK FORM — output persis seperti layout Excel/Juknis
 ============================================================ */
@@ -99,7 +101,20 @@ function buildSppgPrintHtml(m,blank){
   return h;
 }
 function pdfSafe(s){s=String(s==null?'':s).replace(/[\u2013\u2014]/g,'-').replace(/[\u2018\u2019\u201A\u201B]/g,"'").replace(/[\u201C\u201D\u201E]/g,'"').replace(/\u2192/g,'->').replace(/\u2026/g,'...');s=stripEmoji(s);return s.replace(/[^A-Za-z0-9 \-_.,&()/:%+*=#@!?<>"']/g,'').replace(/\s+/g,' ').trim();}
-function formTitle(doc,text,y,PH){if(y>PH-26){doc.addPage();y=18;}doc.setFontSize(9.5);doc.setFont('helvetica','bold');doc.setTextColor(200,16,46);doc.text(pdfSafe(text),12,y);return y+4.5;}
+function pdfTableHead(doc){const theme=doc.__darmaPdfTheme;if(!theme||!theme.tableHead)return TBL_HEAD;return Object.assign({},theme.tableHead,{fillColor:[...theme.tableHead.fillColor],textColor:[...theme.tableHead.textColor]});}
+function pdfLabelBackground(doc){const theme=doc.__darmaPdfTheme;return theme&&theme.labelBackground?[...theme.labelBackground]:[244,244,244];}
+function formTitle(doc,text,y,PH){
+  if(y>PH-26){doc.addPage();y=18;}
+  const theme=doc.__darmaPdfTheme,w=doc.internal.pageSize.getWidth();
+  doc.setFontSize(9.5);doc.setFont('helvetica','bold');
+  if(theme&&theme.sectionBackground&&theme.sectionText){
+    doc.setFillColor(...theme.sectionBackground);doc.roundedRect(12,y-4.5,w-24,7.2,1,1,'F');
+    doc.setTextColor(...theme.sectionText);doc.text(pdfSafe(text),14,y);
+  }else{
+    doc.setTextColor(200,16,46);doc.text(pdfSafe(text),12,y);
+  }
+  return y+4.8;
+}
 function recFormData(jenis,mode){
   const u=unitById(getVal('rUnit'));
   const formType=(jenis==='KDMP'?'KDMP':(currentRekamForm||'SPPG'));
@@ -120,10 +135,10 @@ function gridPdf(doc,fld,data,filled,y,PH){
   if(fld.fields&&fld.fields.length){
     const head=['Item'].concat(fld.fields.map(c=>c.label+(c.unit?' ('+c.unit+')':'')));
     const body=fld.rows.map(r=>[r.label].concat(fld.fields.map(c=>{const v=(d[r.id]&&d[r.id][c.id]);return filled?(v||''):'';})));
-    doc.autoTable({startY:y,head:[head],body:body,styles:{fontSize:7.3,cellPadding:1.4,lineWidth:0.1,lineColor:[180,180,180]},headStyles:TBL_HEAD,columnStyles:{0:{cellWidth:78}}});
+    doc.autoTable({startY:y,head:[head],body:body,styles:{fontSize:7.3,cellPadding:1.4,lineWidth:0.1,lineColor:[180,180,180]},headStyles:pdfTableHead(doc),columnStyles:{0:{cellWidth:78}}});
   }else{
     const yn=fld.rows.some(r=>r.type==='yn');
-    doc.autoTable({startY:y,head:[['Item',yn?'Jawaban':(fld.unit||'Nilai')]],body:fld.rows.map(r=>[r.label,filled?(d[r.id]||''):'']),styles:{fontSize:7.3,cellPadding:1.4,lineWidth:0.1,lineColor:[180,180,180]},headStyles:TBL_HEAD,columnStyles:{0:{cellWidth:88}}});
+    doc.autoTable({startY:y,head:[['Item',yn?'Jawaban':(fld.unit||'Nilai')]],body:fld.rows.map(r=>[r.label,filled?(d[r.id]||''):'']),styles:{fontSize:7.3,cellPadding:1.4,lineWidth:0.1,lineColor:[180,180,180]},headStyles:pdfTableHead(doc),columnStyles:{0:{cellWidth:88}}});
   }
   return doc.lastAutoTable.finalY+4;
 }
@@ -136,8 +151,9 @@ function generateFormPdf(jenis,filled,rec){
   const u=(rec&&rec.unitId)?unitById(rec.unitId):null;
   const tgl=(rec&&rec.tgl)||'',petugas=(rec&&rec.petugas)||'',f=(rec&&rec.form)||{},reportDef=formType==='SPPG'?getSppgFormDefinition(f):(FORMS[formType]||{});
   const pAll = [petugas, (rec&&rec.form&&rec.form.fields&&rec.form.fields.sp109)?'Wawancara: '+rec.form.fields.sp109:''].filter(Boolean).join(' | ');
+  const pdfTheme=themeForFormType(formType);
   let y=pdfHead(doc,isK?'KUESIONER MONEV KDMP/KKMP':(reportDef.title||(formType==='NAKER'?'DAFTAR PERTANYAAN UNTUK TENAGA KERJA':'FORM SURVEI MONITORING SPPG')),
-    isK?'Monev Koperasi Desa/Kelurahan Merah Putih (KDMP/KKMP) - Bangunan Permanen':(reportDef.purpose||'')+(filled?'':' (FORM KOSONG)'));
+    isK?'Monev Koperasi Desa/Kelurahan Merah Putih (KDMP/KKMP) - Bangunan Permanen':(reportDef.purpose||'')+(filled?'':' (FORM KOSONG)'),pdfTheme);
   const idRows=isK
     ? [
         ['Nama KDMP/KKMP',u?u.nama:'','Tanggal Survei',tgl?fmtD(tgl):''],
@@ -150,12 +166,12 @@ function generateFormPdf(jenis,filled,rec){
       ]
     : [['Nama SPPG',u?u.nama:'','Tanggal Survei',tgl?fmtD(tgl):''],['Kabupaten/Kota',u?u.kab:'','Petugas Survei',pAll],['Nama Responden',(f.fields&&(f.fields.sp107||f.fields.nk101))||'','Jabatan/Posisi',(f.fields&&(f.fields.sp108||f.fields.nk102))||'']];
   doc.autoTable({startY:y,
-    body:idRows.map(r=>[{content:pdfSafe(r[0]),styles:{fontStyle:'bold',fillColor:[244,244,244]}},{content:pdfSafe(r[1])},{content:pdfSafe(r[2]),styles:{fontStyle:'bold',fillColor:[244,244,244]}},{content:pdfSafe(r[3])}]).concat([[{content:'Alamat',styles:{fontStyle:'bold',fillColor:[244,244,244]}},{content:pdfSafe(u?u.alamat:''),colSpan:3}]]),
+    body:idRows.map(r=>[{content:pdfSafe(r[0]),styles:{fontStyle:'bold',fillColor:pdfLabelBackground(doc)}},{content:pdfSafe(r[1])},{content:pdfSafe(r[2]),styles:{fontStyle:'bold',fillColor:pdfLabelBackground(doc)}},{content:pdfSafe(r[3])}]).concat([[{content:'Alamat',styles:{fontStyle:'bold',fillColor:pdfLabelBackground(doc)}},{content:pdfSafe(u?u.alamat:''),colSpan:3}]]),
     theme:'grid',styles:{fontSize:8.5,cellPadding:1.7,lineWidth:0.1,lineColor:[180,180,180]},columnStyles:{0:{cellWidth:38},2:{cellWidth:34}}});
   y=doc.lastAutoTable.finalY+5;
   if(isK){
     y=formTitle(doc,'Petunjuk Skala Penilaian (beri tanda X pada kolom pilihan)',y,PH);
-    doc.autoTable({startY:y,head:[['Skor','Kriteria']],body:[['1','Sangat Tidak Baik / Sangat Tidak Setuju'],['2','Kurang Baik / Kurang Setuju'],['3','Baik'],['4','Sangat Baik / Sangat Setuju']],styles:{fontSize:8,cellPadding:1.5},headStyles:TBL_HEAD,columnStyles:{0:{cellWidth:18,halign:'center'}}});
+    doc.autoTable({startY:y,head:[['Skor','Kriteria']],body:[['1','Sangat Tidak Baik / Sangat Tidak Setuju'],['2','Kurang Baik / Kurang Setuju'],['3','Baik'],['4','Sangat Baik / Sangat Setuju']],styles:{fontSize:8,cellPadding:1.5},headStyles:pdfTableHead(doc),columnStyles:{0:{cellWidth:18,halign:'center'}}});
     y=doc.lastAutoTable.finalY+5;
     const secs=f.sections||[];
     FORM_KDMP.forEach((sec,si)=>{
@@ -163,7 +179,7 @@ function generateFormPdf(jenis,filled,rec){
       y=formTitle(doc,sec.kode+'. '+sec.judul,y,PH);
       doc.autoTable({startY:y,head:[['No','Pernyataan','1','2','3','4']],
         body:sec.items.map((it,ii)=>{const sel=filled?(scores[ii]||0):0;return [String(ii+1),pdfSafe(it),sel===1?'X':'',sel===2?'X':'',sel===3?'X':'',sel===4?'X':''];}),
-        styles:{fontSize:7.3,cellPadding:1.4,lineWidth:0.1,lineColor:[180,180,180]},headStyles:TBL_HEAD,
+        styles:{fontSize:7.3,cellPadding:1.4,lineWidth:0.1,lineColor:[180,180,180]},headStyles:pdfTableHead(doc),
         columnStyles:{0:{cellWidth:8,halign:'center'},2:{cellWidth:9,halign:'center'},3:{cellWidth:9,halign:'center'},4:{cellWidth:9,halign:'center'},5:{cellWidth:9,halign:'center'}},
         didParseCell:d=>{if(d.section==='body'&&d.column.index>=2&&d.cell.raw==='X'){d.cell.styles.fontStyle='bold';d.cell.styles.fillColor=[254,242,242];d.cell.styles.textColor=[200,16,46];}}});
       y=doc.lastAutoTable.finalY+4;
@@ -172,12 +188,12 @@ function generateFormPdf(jenis,filled,rec){
     y=formTitle(doc,'Kepatuhan Regulasi & Akuntabilitas (Ya/Tidak)',y,PH);
     doc.autoTable({startY:y,head:[['No','Pernyataan Konfirmasi','Ya','Tidak']],
       body:COMPLIANCE_KDMP.map((c,ci)=>{const sel=filled?comp[ci]:null;return [String(ci+1),pdfSafe(c),sel==='ya'?'X':'',sel==='tidak'?'X':''];}),
-      styles:{fontSize:7.3,cellPadding:1.4,lineWidth:0.1,lineColor:[180,180,180]},headStyles:TBL_HEAD,
+      styles:{fontSize:7.3,cellPadding:1.4,lineWidth:0.1,lineColor:[180,180,180]},headStyles:pdfTableHead(doc),
       columnStyles:{0:{cellWidth:8,halign:'center'},2:{cellWidth:16,halign:'center'},3:{cellWidth:16,halign:'center'}},
       didParseCell:d=>{if(d.section==='body'&&d.column.index>=2&&d.cell.raw==='X'){d.cell.styles.fontStyle='bold';d.cell.styles.fillColor=[236,253,245];d.cell.styles.textColor=[22,101,52];}}});
     y=doc.lastAutoTable.finalY+5;
     y=formTitle(doc,'Klasifikasi Nilai Rata-rata',y,PH);
-    doc.autoTable({startY:y,head:[['Nilai Rata-rata','Kategori']],body:[['3,26 - 4,00','Sangat Baik'],['2,51 - 3,25','Baik'],['1,76 - 2,50','Kurang Baik'],['1,00 - 1,75','Sangat Kurang']],styles:{fontSize:8,cellPadding:1.5,halign:'center'},headStyles:TBL_HEAD});
+    doc.autoTable({startY:y,head:[['Nilai Rata-rata','Kategori']],body:[['3,26 - 4,00','Sangat Baik'],['2,51 - 3,25','Baik'],['1,76 - 2,50','Kurang Baik'],['1,00 - 1,75','Sangat Kurang']],styles:{fontSize:8,cellPadding:1.5,halign:'center'},headStyles:pdfTableHead(doc)});
     y=doc.lastAutoTable.finalY+5;
     if(filled&&f.avg!=null){
       doc.autoTable({startY:y,body:[[{content:'Nilai Rata-rata: '+f.avg,styles:{fontStyle:'bold',fontSize:10,halign:'center'}},{content:'Kategori: '+(f.kategori||''),styles:{fontStyle:'bold',fontSize:10,halign:'center'}},{content:'Status: '+(HASIL_META[f.hasil]?HASIL_META[f.hasil].label:''),styles:{fontStyle:'bold',fontSize:10,halign:'center',textColor:[200,16,46]}}]],theme:'grid',styles:{fillColor:[254,242,242]}});
@@ -209,7 +225,7 @@ function generateFormPdf(jenis,filled,rec){
       if(ng.length){
         doc.autoTable({startY:y,head:[['No','Pertanyaan','Jawaban']],
           body:ng.map((fld,i)=>[String(fld.code||((fld.id&&fld.id.match(/^(?:sp|nk)(\d+)/)||[])[1])||i+1),pdfSafe(fld.label)+(fld.unit?' ('+fld.unit+')':''),pdfSafe(fieldVal(fld,fields[fld.id],filled))]),
-          styles:{fontSize:7.5,cellPadding:1.5,lineWidth:0.1,lineColor:[180,180,180]},headStyles:TBL_HEAD,
+          styles:{fontSize:7.5,cellPadding:1.5,lineWidth:0.1,lineColor:[180,180,180]},headStyles:pdfTableHead(doc),
           columnStyles:{0:{cellWidth:8,halign:'center'},1:{cellWidth:85}},
           didParseCell:d=>{if(d.section==='body'&&d.column.index===2&&d.cell.raw){d.cell.styles.fontStyle='bold';}}});
         y=doc.lastAutoTable.finalY+4;
