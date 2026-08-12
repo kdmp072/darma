@@ -1,4 +1,5 @@
 import { themeForFormType } from './pdf-theme.js';
+import { currencyScaleForField, displayUnitForField, formatStoredCurrency, storedCurrencyToAbsolute } from '../../domain/forms/currency.js';
 
 /* ============================================================
    CETAK FORM — output persis seperti layout Excel/Juknis
@@ -91,7 +92,7 @@ function buildSppgPrintHtml(m,blank){
     h+='<table><thead><tr><th class="kol-no">No</th><th style="text-align:left;width:46%">Pertanyaan</th><th style="text-align:left">Jawaban</th></tr></thead><tbody>';
     sec.fields.forEach((fld,fi)=>{
       const ans=blank?'':fieldVal(fld,fields[fld.id],true),no=fld.code||((fld.id&&fld.id.match(/^sp(\d+)/)||[])[1])||fi+1;
-      h+=`<tr><td class="kol-no">${escP(no)}</td><td>${escP(fld.label)}${fld.unit?` <span class="small">(${escP(fld.unit)})</span>`:''}</td><td>${ans?escP(ans):'<span class="ket">.........................................................................</span>'}</td></tr>`;
+      const unit=unitForOutput(fld);h+=`<tr><td class="kol-no">${escP(no)}</td><td>${escP(fld.label)}${unit?` <span class="small">(${escP(unit)})</span>`:''}</td><td>${ans?escP(ans):'<span class="ket">.........................................................................</span>'}</td></tr>`;
     });
     h+='</tbody></table>';
   });
@@ -127,18 +128,20 @@ function recFormData(jenis,mode){
   }
   return {unitId:u?u.id:'',tgl:'',petugas:'',jenis:jenis,formType:formType,form:jenis==='KDMP'?{sections:[],compliance:[]}:{version:SPPG_FORM_VERSION,fields:{}}};
 }
-function fieldVal(fld,v,filled){if(!filled)return '';if(fld&&fld.type==='photo')return v?'✓ Foto Terlampir (Lihat Gambar di Bawah)':'-';if(fld&&(fld.type==='url'||fld.type==='link'))return v?('Link: '+v):'-';if(Array.isArray(v))return v.join('; ');if(v&&typeof v==='object')return '';return v||'';}
+function fieldVal(fld,v,filled){if(!filled)return '';const scale=currencyScaleForField(fld);if(scale)return formatStoredCurrency(v,scale);if(fld&&fld.type==='photo')return v?'✓ Foto Terlampir (Lihat Gambar di Bawah)':'-';if(fld&&(fld.type==='url'||fld.type==='link'))return v?('Link: '+v):'-';if(Array.isArray(v))return v.join('; ');if(v&&typeof v==='object')return '';return v||'';}
+function currencyValueForOutput(field,parentField,value){const scale=currencyScaleForField(field,parentField);return scale?formatStoredCurrency(value,scale):(value||'');}
+function unitForOutput(field,parentField=null){return displayUnitForField(field,parentField);}
 function hasFormData(form){const f=(form&&form.fields)||{};return Object.keys(f).some(k=>{const v=f[k];if(v==null||v==='')return false;if(Array.isArray(v))return v.length>0;if(typeof v==='object')return Object.values(v).some(x=>x&&(typeof x!=='object'||Object.values(x).some(z=>z)));return true;});}
 function gridPdf(doc,fld,data,filled,y,PH){
-  const d=data||{};
-  y=formTitle(doc,fld.label+(fld.unit?' ('+fld.unit+')':''),y,PH);
+  const d=data||{},fieldUnit=unitForOutput(fld);
+  y=formTitle(doc,fld.label+(fieldUnit?' ('+fieldUnit+')':''),y,PH);
   if(fld.fields&&fld.fields.length){
-    const head=['Item'].concat(fld.fields.map(c=>c.label+(c.unit?' ('+c.unit+')':'')));
-    const body=fld.rows.map(r=>[r.label].concat(fld.fields.map(c=>{const v=(d[r.id]&&d[r.id][c.id]);return filled?(v||''):'';})));
-    doc.autoTable({startY:y,head:[head],body:body,styles:{fontSize:7.3,cellPadding:1.4,lineWidth:0.1,lineColor:[180,180,180]},headStyles:pdfTableHead(doc),columnStyles:{0:{cellWidth:78}}});
+    const head=['Item'].concat(fld.fields.map(column=>{const unit=unitForOutput(column,fld);return column.label+(unit?' ('+unit+')':'');}));
+    const body=fld.rows.map(row=>[row.label].concat(fld.fields.map(column=>{const value=d[row.id]&&d[row.id][column.id];return filled?currencyValueForOutput(column,fld,value):'';})));
+    doc.autoTable({startY:y,head:[head],body,styles:{fontSize:7.3,cellPadding:1.4,lineWidth:0.1,lineColor:[180,180,180]},headStyles:pdfTableHead(doc),columnStyles:{0:{cellWidth:78}}});
   }else{
-    const yn=fld.rows.some(r=>r.type==='yn');
-    doc.autoTable({startY:y,head:[['Item',yn?'Jawaban':(fld.unit||'Nilai')]],body:fld.rows.map(r=>[r.label,filled?(d[r.id]||''):'']),styles:{fontSize:7.3,cellPadding:1.4,lineWidth:0.1,lineColor:[180,180,180]},headStyles:pdfTableHead(doc),columnStyles:{0:{cellWidth:88}}});
+    const yn=fld.rows.some(row=>row.type==='yn');
+    doc.autoTable({startY:y,head:[['Item',yn?'Jawaban':(fieldUnit||'Nilai')]],body:fld.rows.map(row=>[row.label,filled?currencyValueForOutput(fld,null,d[row.id]):'']),styles:{fontSize:7.3,cellPadding:1.4,lineWidth:0.1,lineColor:[180,180,180]},headStyles:pdfTableHead(doc),columnStyles:{0:{cellWidth:88}}});
   }
   return doc.lastAutoTable.finalY+4;
 }
@@ -224,7 +227,7 @@ function generateFormPdf(jenis,filled,rec){
       const ng=sec.fields.filter(fld=>fld.type!=='g');
       if(ng.length){
         doc.autoTable({startY:y,head:[['No','Pertanyaan','Jawaban']],
-          body:ng.map((fld,i)=>[String(fld.code||((fld.id&&fld.id.match(/^(?:sp|nk)(\d+)/)||[])[1])||i+1),pdfSafe(fld.label)+(fld.unit?' ('+fld.unit+')':''),pdfSafe(fieldVal(fld,fields[fld.id],filled))]),
+          body:ng.map((fld,i)=>{const unit=unitForOutput(fld);return [String(fld.code||((fld.id&&fld.id.match(/^(?:sp|nk)(\d+)/)||[])[1])||i+1),pdfSafe(fld.label)+(unit?' ('+unit+')':''),pdfSafe(fieldVal(fld,fields[fld.id],filled))];}),
           styles:{fontSize:7.5,cellPadding:1.5,lineWidth:0.1,lineColor:[180,180,180]},headStyles:pdfTableHead(doc),
           columnStyles:{0:{cellWidth:8,halign:'center'},1:{cellWidth:85}},
           didParseCell:d=>{if(d.section==='body'&&d.column.index===2&&d.cell.raw){d.cell.styles.fontStyle='bold';}}});
@@ -262,16 +265,27 @@ function generateFormPdf(jenis,filled,rec){
   toast('PDF form '+formType+' terunduh');
 }
 /* ===== Generator Excel form (SheetJS) — file .xlsx persis struktur form ===== */
-function gridXls(aoa,fld,data,filled){
-  const d=data||{};
-  aoa.push(['(tabel)',fld.label+(fld.unit?' ('+fld.unit+')':''),'']);
+function gridXls(aoa,fld,data,filled,currencyCells){
+  const d=data||{},fieldUnit=unitForOutput(fld);
+  aoa.push(['(tabel)',fld.label+(fieldUnit?' ('+fieldUnit+')':''),'']);
   if(fld.fields&&fld.fields.length){
-    aoa.push(['Item'].concat(fld.fields.map(c=>c.label)));
-    fld.rows.forEach(r=>aoa.push([r.label].concat(fld.fields.map(c=>{const v=(d[r.id]&&d[r.id][c.id]);return filled?(v||''):'';}))));
+    aoa.push(['Item'].concat(fld.fields.map(column=>{const unit=unitForOutput(column,fld);return column.label+(unit?' ('+unit+')':'');})));
+    fld.rows.forEach(row=>{
+      const rowIndex=aoa.length,values=fld.fields.map((column,columnIndex)=>{
+        const value=d[row.id]&&d[row.id][column.id],scale=currencyScaleForField(column,fld);
+        if(filled&&scale){currencyCells.push({r:rowIndex,c:columnIndex+1});return storedCurrencyToAbsolute(value,scale);}
+        return filled?(value||''):'';
+      });
+      aoa.push([row.label].concat(values));
+    });
   }else{
-    const yn=fld.rows.some(r=>r.type==='yn');
-    aoa.push(['Item',yn?'Jawaban':(fld.unit||'Nilai')]);
-    fld.rows.forEach(r=>aoa.push([r.label,filled?(d[r.id]||''):'']));
+    const yn=fld.rows.some(row=>row.type==='yn'),scale=currencyScaleForField(fld);
+    aoa.push(['Item',yn?'Jawaban':(fieldUnit||'Nilai')]);
+    fld.rows.forEach(row=>{
+      const rowIndex=aoa.length,value=d[row.id];
+      if(filled&&scale)currencyCells.push({r:rowIndex,c:1});
+      aoa.push([row.label,filled?(scale?storedCurrencyToAbsolute(value,scale):(value||'')):'']);
+    });
   }
   aoa.push([]);
 }
@@ -280,7 +294,7 @@ function generateFormXlsx(jenis,filled,rec){
   const formType=(rec&&rec.formType)||(jenis==='KDMP'?'KDMP':'SPPG');const isK=formType==='KDMP';
   const u=(rec&&rec.unitId)?unitById(rec.unitId):null;
   const tgl=(rec&&rec.tgl)||'',petugas=(rec&&rec.petugas)||'',f=(rec&&rec.form)||{},reportDef=formType==='SPPG'?getSppgFormDefinition(f):(FORMS[formType]||{});
-  const aoa=[];
+  const aoa=[],currencyCells=[];
   aoa.push([isK?'KUESIONER MONEV KDMP/KKMP':(reportDef.title||'FORM')]);
   aoa.push([reportDef.purpose||'']);
   aoa.push([]);
@@ -315,8 +329,8 @@ function generateFormXlsx(jenis,filled,rec){
       aoa.push([sec.title,'','']);
       aoa.push(['No','Pertanyaan','Jawaban']);
       sec.fields.forEach((fld,i)=>{
-        if(fld.type==='g'){gridXls(aoa,fld,fields[fld.id],filled);}
-        else{aoa.push([fld.code||((fld.id&&fld.id.match(/^(?:sp|nk)(\d+)/)||[])[1])||i+1,fld.label+(fld.unit?' ('+fld.unit+')':''),fieldVal(fld,fields[fld.id],filled)]);}
+        if(fld.type==='g'){gridXls(aoa,fld,fields[fld.id],filled,currencyCells);}
+        else{const unit=unitForOutput(fld),scale=currencyScaleForField(fld),rowIndex=aoa.length,value=scale?(filled?storedCurrencyToAbsolute(fields[fld.id],scale):''):fieldVal(fld,fields[fld.id],filled);if(filled&&scale)currencyCells.push({r:rowIndex,c:2});aoa.push([fld.code||((fld.id&&fld.id.match(/^(?:sp|nk)(\d+)/)||[])[1])||i+1,fld.label+(unit?' ('+unit+')':''),value]);}
       });
       aoa.push([]);
     });
@@ -324,7 +338,8 @@ function generateFormXlsx(jenis,filled,rec){
     if(filled&&rec&&rec.hasil)aoa.push(['STATUS MONITORING',HASIL_META[rec.hasil]?HASIL_META[rec.hasil].label:rec.hasil,'']);
   }
   const ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols']=[{wch:6},{wch:58},{wch:16},{wch:16},{wch:16},{wch:16}];
+  currencyCells.forEach(position=>{const address=XLSX.utils.encode_cell(position);if(ws[address])ws[address].z='"Rp"#,##0",-"';});
+  ws['!cols']=[{wch:6},{wch:58},{wch:18},{wch:18},{wch:18},{wch:18}];
   ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:5}}];
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Form '+formType);
