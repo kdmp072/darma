@@ -10,4 +10,4 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "darma"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "26ec49cb-4cd3-4f79-ad23-d2d7681d9423"
