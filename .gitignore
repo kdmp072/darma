@@ -1,0 +1,11 @@
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+*.log
+
+# Data sensitif / hasil restore
+DARMA_backup_*.json
+*.backup.json
+restore-d1.sql
+.env
