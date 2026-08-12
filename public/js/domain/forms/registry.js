@@ -174,6 +174,10 @@ const sp411=sppgV2Field('sp411');sp411.label='Pengeluaran bahan baku minggu lalu
 const sp410=sppgV2Field('sp410');sp410.label='Pengeluaran bahan baku minggu lalu (berdasarkan kelompok supplier)';
 const sp413=sppgV2Field('sp413');sp413.label='Pengeluaran biaya operasional minggu lalu';
 const row413={tk:'Tenaga kerja/Relawan',bbm:'Bensin/Solar/BBM lain',lpg:'LPG/BBG/Gas Kota',util:'Utilitas: Listrik, Air Bersih, dll.',sewa:'Sewa kendaraan',lain:'Biaya Operasional Lainnya'};sp413.rows.forEach(r=>{if(row413[r.id])r.label=row413[r.id];});
+// Input keuangan ditampilkan sebagai Rupiah penuh, tetapi nilai JSON tetap memakai skala instrumen lama.
+['sp401','sp403'].forEach(id=>Object.assign(sppgV2Field(id),{currencyScale:1000000,currencyDisplayUnit:'Rupiah'}));
+['sp410','sp411','sp413'].forEach(id=>Object.assign(sppgV2Field(id),{currencyScale:1000000,currencyDisplayUnit:'Rupiah'}));
+Object.assign(sppgV2Field('sp412'),{currencyScale:1000,currencyDisplayUnit:'Rupiah/kg'});
 sppgV2Replace(3,'sp414',{id:'sp414',code:'414',label:'Kendala terkait proses penyiapan dan distribusi MBG di SPPG (bisa lebih dari satu)',type:'m',opts:['Ketersediaan bahan baku','Harga bahan baku meningkat','Pembayaran ke supplier terhambat','Petty cash tidak mencukupi','Keterlambatan pencairan anggaran dari BGN','Lainnya']});
 sppgV2InsertAfter(3,'sp414',{id:'sp414_lain',code:'414a',label:'Lainnya, sebutkan',type:'t'});
 FORM_SPPG_V2.sections.forEach(sec=>sec.fields.forEach(f=>{if(!f.code){const m=f.id.match(/^sp(\d+)/);if(m)f.code=m[1];}}));
@@ -214,6 +218,9 @@ const FORM_NAKER={key:'NAKER',title:'DAFTAR PERTANYAAN UNTUK TENAGA KERJA',purpo
     {id:'nk310',label:'Dampak ekonomi SPPG bagi lingkungan/pelaku usaha sekitar',type:'ta'}
   ]}
 ]};
+FORM_NAKER.sections.forEach(section=>section.fields.forEach(field=>{
+  if(['nk203','nk207'].includes(field.id))Object.assign(field,{currencyScale:1,currencyDisplayUnit:'Rupiah/bulan'});
+}));
 const FORMS={SPPG:FORM_SPPG_V2,NAKER:FORM_NAKER};
 function getSppgFormDefinition(form){return form&&form.version===SPPG_FORM_VERSION?FORM_SPPG_V2:FORM_SPPG_V1;}
 function getActiveSppgFormDefinition(){return currentSppgFormVersion===SPPG_FORM_VERSION?FORM_SPPG_V2:FORM_SPPG_V1;}
